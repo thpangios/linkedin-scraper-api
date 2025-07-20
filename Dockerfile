@@ -1,6 +1,6 @@
 FROM node:18-slim
 
-# Install Puppeteer dependencies
+# Install all required dependencies for headless Chromium
 RUN apt-get update && apt-get install -y \
     wget \
     ca-certificates \
@@ -20,15 +20,28 @@ RUN apt-get update && apt-get install -y \
     libxrandr2 \
     libxss1 \
     libxtst6 \
+    libxshmfence1 \
+    libxcb-dri3-0 \
+    libdrm2 \
+    libgbm1 \
+    libxinerama1 \
+    libxext6 \
+    libxfixes3 \
+    libgl1 \
     xdg-utils \
     --no-install-recommends && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
+
+# Optional: add non-root user (safer puppeteer context)
+RUN useradd -m puppeteer
 
 WORKDIR /app
 COPY . .
 
 RUN npm install
 RUN npm run build
+
+USER puppeteer
 
 CMD ["node", "-r", "dotenv/config", "dist/examples/server.js"]
