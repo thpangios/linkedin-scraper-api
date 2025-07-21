@@ -19,7 +19,7 @@ const getIsCity = (text) => {
     if (['new york'].includes(lowerCaseText)) {
         return true;
     }
-    return !!all_the_cities_1.default.find(city => city.name.toLowerCase() === lowerCaseText);
+    return !!all_the_cities_1.default.find((city) => city.name.toLowerCase() === lowerCaseText);
 };
 exports.getIsCity = getIsCity;
 const formatDate = (date) => {

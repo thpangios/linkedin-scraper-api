@@ -110,11 +110,11 @@ class LinkedInProfileScraper {
                     '--disable-default-apps',
                     '--disable-domain-reliability',
                     '--disable-component-update',
-                    '--disable-client-side-phishing-detection'
+                    '--disable-client-side-phishing-detection',
+                    '--ignore-certificate-errors'
                 ],
                 timeout: this.options.timeout,
-                ignoreDefaultArgs: ['--enable-automation', '--enable-blink-features=IdleDetection'],
-                ignoreHTTPSErrors: true
+                ignoreDefaultArgs: ['--enable-automation', '--enable-blink-features=IdleDetection']
             };
             this.browser = await puppeteer_1.default.launch(launchOptions);
             (0, utils_1.statusLog)(logSection, 'Chrome for Testing launched successfully!');
@@ -310,7 +310,7 @@ class LinkedInProfileScraper {
                 waitUntil: 'networkidle2',
                 timeout: this.options.timeout
             });
-            await page.waitForTimeout(2000);
+            await new Promise(resolve => setTimeout(resolve, 2000));
             const currentUrl = page.url();
             const isLoggedIn = currentUrl.includes('/feed') || currentUrl.includes('/in/');
             await page.close();
@@ -354,7 +354,7 @@ class LinkedInProfileScraper {
             await page.waitForSelector('main', { timeout: 15000 });
             (0, utils_1.statusLog)(logSection, '📜 Loading all profile content...', scraperSessionId);
             await smartScroll(page);
-            await page.waitForTimeout(3000);
+            await new Promise(resolve => setTimeout(resolve, 3000));
             (0, utils_1.statusLog)(logSection, '🔍 Extracting profile data using modern techniques...', scraperSessionId);
             const rawUserProfileData = await page.evaluate(() => {
                 const url = window.location.href;

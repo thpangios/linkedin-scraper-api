@@ -183,7 +183,7 @@ export class LinkedInProfileScraper {
       statusLog(logSection, `Launching Puppeteer with Chrome for Testing...`);
 
       const launchOptions: ModernPuppeteerLaunchOptions = {
-        headless: this.options.headless,
+        headless: this.options.headless as any,
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
@@ -225,11 +225,11 @@ export class LinkedInProfileScraper {
           '--disable-default-apps',
           '--disable-domain-reliability',
           '--disable-component-update',
-          '--disable-client-side-phishing-detection'
+          '--disable-client-side-phishing-detection',
+          '--ignore-certificate-errors'
         ],
         timeout: this.options.timeout,
-        ignoreDefaultArgs: ['--enable-automation', '--enable-blink-features=IdleDetection'],
-        ignoreHTTPSErrors: true
+        ignoreDefaultArgs: ['--enable-automation', '--enable-blink-features=IdleDetection']
       };
 
       this.browser = await puppeteer.launch(launchOptions);
@@ -311,9 +311,9 @@ export class LinkedInProfileScraper {
 
         // Randomize canvas fingerprint
         const getContext = HTMLCanvasElement.prototype.getContext;
-        HTMLCanvasElement.prototype.getContext = function(this: HTMLCanvasElement, ...args: any[]) {
+        HTMLCanvasElement.prototype.getContext = function(this: HTMLCanvasElement, ...args: any[]): any {
           if (args[0] === '2d') {
-            const context = getContext.apply(this, args);
+            const context = (getContext as any).apply(this, args);
             if (context) {
               const originalFillText = (context as CanvasRenderingContext2D).fillText;
               (context as CanvasRenderingContext2D).fillText = function(...textArgs: any[]) {
@@ -322,7 +322,7 @@ export class LinkedInProfileScraper {
             }
             return context;
           }
-          return getContext.apply(this, args);
+          return (getContext as any).apply(this, args);
         };
       });
 
@@ -476,7 +476,7 @@ export class LinkedInProfileScraper {
       });
 
       // Use modern page.waitForTimeout instead of workarounds
-      await page.waitForTimeout(2000);
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
       const currentUrl = page.url();
       const isLoggedIn = currentUrl.includes('/feed') || currentUrl.includes('/in/');
@@ -545,7 +545,7 @@ export class LinkedInProfileScraper {
       await smartScroll(page);
       
       // Wait for dynamic content to stabilize
-      await page.waitForTimeout(3000);
+      await new Promise(resolve => setTimeout(resolve, 3000));
 
       statusLog(logSection, '🔍 Extracting profile data using modern techniques...', scraperSessionId);
 

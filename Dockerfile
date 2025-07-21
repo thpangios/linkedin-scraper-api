@@ -42,11 +42,16 @@ RUN useradd -m puppeteer
 WORKDIR /app
 COPY . .
 
-RUN npm install
-# Ensure compatibility with Puppeteer 24.x
-RUN npm run build
-RUN npm run build
+RUN npm install && npm run build
 
+# Set PUPPETEER_CACHE_DIR to a location within the 'puppeteer' user's home directory
+# This ensures the browser is installed in a path accessible by the 'puppeteer' user
+ENV PUPPETEER_CACHE_DIR=/home/puppeteer/.cache/puppeteer
+
+# Switch to the non-root user before installing the browser
 USER puppeteer
+
+# Install Chrome browser as the 'puppeteer' user into their cache directory
+RUN npx puppeteer browsers install chrome
 
 CMD ["node", "-r", "dotenv/config", "dist/examples/server.js"]

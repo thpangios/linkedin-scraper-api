@@ -31,7 +31,7 @@ export const getIsCity = (text: string): boolean => {
     return true;
   }
 
-  return !!cities.find(city => city.name.toLowerCase() === lowerCaseText);
+  return !!cities.find((city: { name: string }) => city.name.toLowerCase() === lowerCaseText);
 };
 
 // Use proper moment types and default import
