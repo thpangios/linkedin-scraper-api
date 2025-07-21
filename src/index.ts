@@ -436,7 +436,7 @@ export class LinkedInProfileScraper {
       await autoScroll(page);
 
       // Wait for dynamic content to load
-      await page.waitForTimeout(2000);
+      await page.waitFor(2000);
 
       statusLog(logSection, 'Parsing data...', scraperSessionId)
 
@@ -538,8 +538,8 @@ export class LinkedInProfileScraper {
           if (experienceNodes.length > 0) break;
         }
 
-        if (experienceNodes) {
-          for (const node of experienceNodes) {
+        if (experienceNodes && experienceNodes.length > 0) {
+          Array.from(experienceNodes).forEach((node) => {
             try {
               const titleElement = node.querySelector('div[data-field="title"]') || 
                                  node.querySelector('.mr1.t-bold span') ||
@@ -588,9 +588,9 @@ export class LinkedInProfileScraper {
               }
             } catch (e) {
               // Skip problematic nodes
-              continue;
+              return;
             }
-          }
+          });
         }
 
         return data;
@@ -641,8 +641,8 @@ export class LinkedInProfileScraper {
           if (educationNodes.length > 0) break;
         }
 
-        if (educationNodes) {
-          for (const node of educationNodes) {
+        if (educationNodes && educationNodes.length > 0) {
+          Array.from(educationNodes).forEach((node) => {
             try {
               const schoolNameElement = node.querySelector('.mr1.hoverable-link-text.t-bold') ||
                                       node.querySelector('h3.pv-entity__school-name') ||
@@ -673,9 +673,9 @@ export class LinkedInProfileScraper {
                 });
               }
             } catch (e) {
-              continue;
+              return;
             }
-          }
+          });
         }
 
         return data
@@ -716,8 +716,8 @@ export class LinkedInProfileScraper {
           if (volunteerNodes.length > 0) break;
         }
 
-        if (volunteerNodes) {
-          for (const node of volunteerNodes) {
+        if (volunteerNodes && volunteerNodes.length > 0) {
+          Array.from(volunteerNodes).forEach((node) => {
             try {
               const titleElement = node.querySelector('.pv-entity__summary-info h3');
               const title = titleElement?.textContent?.trim() || null;
@@ -749,9 +749,9 @@ export class LinkedInProfileScraper {
                 });
               }
             } catch (e) {
-              continue;
+              return;
             }
-          }
+          });
         }
 
         return data
