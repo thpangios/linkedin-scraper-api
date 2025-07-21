@@ -1,31 +1,39 @@
 require("dotenv").config();
-
 import express from "express";
 import { LinkedInProfileScraper } from "../index";
-
 const app = express();
-
 (async () => {
-  // Setup environment variables to fill the sessionCookieValue
   const scraper = new LinkedInProfileScraper({
     sessionCookieValue: `${process.env.LINKEDIN_SESSION_COOKIE_VALUE}`,
     keepAlive: false,
   });
-
-  // Prepare the scraper
-  // Loading it in memory
   await scraper.setup();
-
-  // Usage: http://localhost:3000/?url=https://www.linkedin.com/in/someuser/
-  app.get("/", async (req, res) => {
-    const urlToScrape = req.query.url as string;
-
-    const result = await scraper.run(urlToScrape);
-
-    return res.json(result);
+  
+  // Health check route
+  app.get("/", (req, res) => {
+    res.json({ 
+      status: "LinkedIn Scraper API is running! 🚀",
+      usage: "Send GET to /scrape?profileUrl=https://www.linkedin.com/in/username"
+    });
   });
-
- app.listen(Number(process.env.PORT) || 3000, "0.0.0.0", () => {
-  console.log("🚀 LinkedIn Scraper API running on port", process.env.PORT || 3000);
-});
-})(); // ← This closes the (async () => { function
+  
+  // Scraping route
+  app.get("/scrape", async (req, res) => {
+    const profileUrl = req.query.profileUrl as string;
+    
+    if (!profileUrl) {
+      return res.status(400).json({ error: "Missing profileUrl parameter" });
+    }
+    
+    try {
+      const result = await scraper.run(profileUrl);
+      return res.json(result);
+    } catch (error) {
+      return res.status(500).json({ error: error.message });
+    }
+  });
+  
+  app.listen(Number(process.env.PORT) || 3000, "0.0.0.0", () => {
+    console.log("🚀 LinkedIn Scraper API running on port", process.env.PORT || 3000);
+  });
+})();
