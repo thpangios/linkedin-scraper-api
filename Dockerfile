@@ -1,6 +1,6 @@
-FROM node:18-slim
+FROM node:18.19-slim
 
-# Install all required dependencies for headless Chromium
+# Install all required dependencies for modern headless Chromium
 RUN apt-get update && apt-get install -y \
     wget \
     ca-certificates \
@@ -29,6 +29,9 @@ RUN apt-get update && apt-get install -y \
     libxfixes3 \
     libgl1 \
     xdg-utils \
+    gnupg \
+    lsb-release \
+    software-properties-common \
     --no-install-recommends && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
@@ -40,6 +43,8 @@ WORKDIR /app
 COPY . .
 
 RUN npm install
+# Ensure compatibility with Puppeteer 24.x
+RUN npm run build
 RUN npm run build
 
 USER puppeteer

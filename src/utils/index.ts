@@ -1,9 +1,15 @@
-// Fixed: Use namespace import for better compatibility
-import * as moment from 'moment-timezone';
-import { Location } from './index';
+// Modern TypeScript utilities with proper typing for 2025
+import moment from 'moment-timezone';
 import { Page } from 'puppeteer';
 import countries from 'i18n-iso-countries';
 import cities from 'all-the-cities';
+
+// Define Location interface locally to avoid circular imports
+export interface Location {
+  city: string | null;
+  province: string | null;
+  country: string | null;
+}
 
 export const getIsCountry = (text: string): boolean => {
   const countriesList = Object.values(countries.getNames('en'));
@@ -28,8 +34,9 @@ export const getIsCity = (text: string): boolean => {
   return !!cities.find(city => city.name.toLowerCase() === lowerCaseText);
 };
 
-// Fixed: Use moment.MomentInput instead of redundant union
-export const formatDate = (date: moment.MomentInput): string => {
+// Use proper moment types and default import
+export const formatDate = (date: string | Date | null): string | null => {
+  if (!date) return null;
   if (date === 'Present') {
     return moment().format();
   }
@@ -38,7 +45,7 @@ export const formatDate = (date: moment.MomentInput): string => {
 };
 
 // Fixed: Use consistent moment.MomentInput types
-export const getDurationInDays = (formattedStartDate: moment.MomentInput, formattedEndDate: moment.MomentInput): number | null => {
+export const getDurationInDays = (formattedStartDate: string | Date | null, formattedEndDate: string | Date | null): number | null => {
   if (!formattedStartDate || !formattedEndDate) return null;
   // +1 to include the start date
   return moment(formattedEndDate).diff(moment(formattedStartDate), 'days') + 1;
@@ -81,7 +88,7 @@ export const getLocationFromText = (text: string): Location | null => {
     if (getIsCity(parts[0]) && getIsCountry(parts[1])) {
       return {
         city: parts[0],
-        province: null, // Fixed: explicit null instead of undefined variable
+        province: null,
         country: parts[1]
       };
     }
@@ -91,12 +98,12 @@ export const getLocationFromText = (text: string): Location | null => {
       return {
         city: parts[0],
         province: parts[1],
-        country: null // Fixed: explicit null instead of undefined variable
+        country: null
       };
     }
 
     return {
-      city: null, // Fixed: explicit null instead of undefined variable
+      city: null,
       province: parts[0],
       country: parts[1]
     };
@@ -107,8 +114,8 @@ export const getLocationFromText = (text: string): Location | null => {
   // Just find out if it's one of: city, province/state or country
   if (getIsCountry(parts[0])) {
     return {
-      city: null, // Fixed: explicit null
-      province: null, // Fixed: explicit null
+      city: null,
+      province: null,
       country: parts[0]
     };
   } 
@@ -116,16 +123,16 @@ export const getLocationFromText = (text: string): Location | null => {
   if (getIsCity(parts[0])) {
     return {
       city: parts[0],
-      province: null, // Fixed: explicit null
-      country: null // Fixed: explicit null
+      province: null,
+      country: null
     };
   }
 
   // Else, it must be a province/state. We just don't know and assume it is.
   return {
-    city: null, // Fixed: explicit null
+    city: null,
     province: parts[0],
-    country: null // Fixed: explicit null
+    country: null
   };
 };
 
@@ -152,7 +159,7 @@ export const statusLog = (section: string, message: string, scraperSessionId?: s
   console.log(`Scraper (${section})${sessionPart}${messagePart}`);
 };
 
-// Fixed: Promise typing and resolve without argument issues
+// Modern async/await pattern with proper typing
 export const autoScroll = async (page: Page): Promise<void> => {
   await page.evaluate(async (): Promise<void> => {
     await new Promise<void>((resolve): void => {
@@ -165,7 +172,7 @@ export const autoScroll = async (page: Page): Promise<void> => {
 
         if (totalHeight >= scrollHeight) {
           clearInterval(timer);
-          resolve(); // Fixed: resolve() now properly matches Promise<void>
+          resolve();
         }
       }, 100);
     });

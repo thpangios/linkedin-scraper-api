@@ -2,23 +2,8 @@ import puppeteer, { Page, Browser } from 'puppeteer';
 import treeKill from 'tree-kill';
 
 import blockedHostsList from './blocked-hosts';
-import { getDurationInDays, formatDate, getCleanText, getLocationFromText, statusLog, getHostname } from './utils';
+import { getDurationInDays, formatDate, getCleanText, getLocationFromText, statusLog, getHostname, Location } from './utils';
 import { SessionExpired } from './errors';
-
-export interface Location {
-  city: string | null;
-  province: string | null;
-  country: string | null;
-}
-
-interface RawProfile {
-  fullName: string | null;
-  title: string | null;
-  location: string | null;
-  photo: string | null;
-  description: string | null;
-  url: string;
-}
 
 export interface Profile {
   fullName: string | null;
@@ -29,15 +14,13 @@ export interface Profile {
   url: string;
 }
 
-interface RawExperience {
+interface RawProfile {
+  fullName: string | null;
   title: string | null;
-  company: string | null;
-  employmentType: string | null;
   location: string | null;
-  startDate: string | null;
-  endDate: string | null;
-  endDateIsPresent: boolean;
+  photo: string | null;
   description: string | null;
+  url: string;
 }
 
 export interface Experience {
@@ -52,12 +35,15 @@ export interface Experience {
   description: string | null;
 }
 
-interface RawEducation {
-  schoolName: string | null;
-  degreeName: string | null;
-  fieldOfStudy: string | null;
+interface RawExperience {
+  title: string | null;
+  company: string | null;
+  employmentType: string | null;
+  location: string | null;
   startDate: string | null;
   endDate: string | null;
+  endDateIsPresent: boolean;
+  description: string | null;
 }
 
 export interface Education {
@@ -69,13 +55,12 @@ export interface Education {
   durationInDays: number | null;
 }
 
-interface RawVolunteerExperience {
-  title: string | null;
-  company: string | null;
+interface RawEducation {
+  schoolName: string | null;
+  degreeName: string | null;
+  fieldOfStudy: string | null;
   startDate: string | null;
   endDate: string | null;
-  endDateIsPresent: boolean;
-  description: string | null;
 }
 
 export interface VolunteerExperience {
@@ -85,6 +70,15 @@ export interface VolunteerExperience {
   endDate: string | null;
   endDateIsPresent: boolean;
   durationInDays: number | null;
+  description: string | null;
+}
+
+interface RawVolunteerExperience {
+  title: string | null;
+  company: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  endDateIsPresent: boolean;
   description: string | null;
 }
 
@@ -109,8 +103,8 @@ interface ScraperOptions {
   headless: boolean | 'new' | 'shell';
 }
 
-// Fixed: Puppeteer v24 compatible launch options type
-type PuppeteerLaunchOptions = Parameters<typeof puppeteer.launch>[0];
+// Modern Puppeteer v24+ compatible launch options type
+type ModernPuppeteerLaunchOptions = Parameters<typeof puppeteer.launch>[0];
 
 async function smartScroll(page: Page): Promise<void> {
   await page.evaluate(async (): Promise<void> => {
@@ -188,7 +182,7 @@ export class LinkedInProfileScraper {
     try {
       statusLog(logSection, `Launching Puppeteer with Chrome for Testing...`);
 
-      const launchOptions: PuppeteerLaunchOptions = {
+      const launchOptions: ModernPuppeteerLaunchOptions = {
         headless: this.options.headless,
         args: [
           '--no-sandbox',
@@ -277,7 +271,7 @@ export class LinkedInProfileScraper {
 
       statusLog(logSection, `Blocking resources: ${blockedResources.join(', ')}`);
 
-      // Enhanced anti-detection
+      // Enhanced anti-detection with modern typing
       await page.evaluateOnNewDocument((): void => {
         // Override the `plugins` property to use a custom getter
         Object.defineProperty(navigator, 'plugins', {
@@ -299,14 +293,17 @@ export class LinkedInProfileScraper {
           runtime: {}
         };
 
-        // Fixed: Override permissions with proper PermissionStatus return type
+        // Modern PermissionStatus object implementation
         const originalQuery = window.navigator.permissions.query;
         window.navigator.permissions.query = (parameters: PermissionDescriptor): Promise<PermissionStatus> => {
           if (parameters.name === 'notifications') {
             return Promise.resolve({
               state: Notification.permission as PermissionState,
-              name: 'notifications',
-              onchange: null
+              name: 'notifications' as PermissionName,
+              onchange: null,
+              addEventListener: () => {},
+              removeEventListener: () => {},
+              dispatchEvent: () => false
             } as PermissionStatus);
           }
           return originalQuery.call(window.navigator.permissions, parameters);
@@ -478,10 +475,8 @@ export class LinkedInProfileScraper {
         timeout: this.options.timeout
       });
 
-      // Fixed: Use page.waitForTimeout properly or replace with setTimeout
-      await new Promise<void>((resolve): void => {
-        setTimeout(resolve, 2000);
-      });
+      // Use modern page.waitForTimeout instead of workarounds
+      await page.waitForTimeout(2000);
 
       const currentUrl = page.url();
       const isLoggedIn = currentUrl.includes('/feed') || currentUrl.includes('/in/');
@@ -508,7 +503,13 @@ export class LinkedInProfileScraper {
    * Modern LinkedIn Profile Scraper - 2025 Edition
    * Optimized for Puppeteer 24.14.0 with Chrome for Testing
    */
-  public run = async (profileUrl: string) => {
+  public run = async (profileUrl: string): Promise<{
+    userProfile: Profile;
+    experiences: Experience[];
+    education: Education[];
+    volunteerExperiences: VolunteerExperience[];
+    skills: Skill[];
+  }> => {
     const logSection = 'run';
     const scraperSessionId = Date.now();
 
@@ -544,9 +545,7 @@ export class LinkedInProfileScraper {
       await smartScroll(page);
       
       // Wait for dynamic content to stabilize
-      await new Promise<void>((resolve): void => {
-        setTimeout(resolve, 3000);
-      });
+      await page.waitForTimeout(3000);
 
       statusLog(logSection, '🔍 Extracting profile data using modern techniques...', scraperSessionId);
 
@@ -634,6 +633,7 @@ export class LinkedInProfileScraper {
         }
 
         if (experienceNodes) {
+          // Use Array.from to properly iterate over NodeListOf<Element>
           Array.from(experienceNodes).forEach((node): void => {
             try {
               const titleElement = node.querySelector('h3') || 
