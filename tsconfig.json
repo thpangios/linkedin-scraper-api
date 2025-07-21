@@ -15,14 +15,14 @@
     "stripInternal": true,
     "strictNullChecks": true,
     "downlevelIteration": true,
-    "lib": ["es6", "DOM"],
+    "lib": ["ES2020", "DOM"],          // ← UPDATED
     "moduleResolution": "node",
     "outDir": "dist",
-    "target": "es6",
+    "target": "ES2020",                // ← UPDATED
     "module": "commonjs",
     "removeComments": true,
     "incremental": true,
-    "skipLibCheck": true, // Fix conflict with node types: https://github.com/DefinitelyTyped/DefinitelyTyped/issues/16825
+    "skipLibCheck": true,
     "plugins": [{ "name": "typescript-tslint-plugin" }],
     "types": ["node", "jest"],
     "paths": {
