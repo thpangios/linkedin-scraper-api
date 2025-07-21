@@ -1,4 +1,4 @@
-import puppeteer, { Page, Browser, PuppeteerLaunchOptions } from 'puppeteer';
+import puppeteer, { Page, Browser } from 'puppeteer';
 import treeKill from 'tree-kill';
 
 import blockedHostsList from './blocked-hosts';
@@ -109,15 +109,18 @@ interface ScraperOptions {
   headless: boolean | 'new' | 'shell';
 }
 
+// Fixed: Puppeteer v24 compatible launch options type
+type PuppeteerLaunchOptions = Parameters<typeof puppeteer.launch>[0];
+
 async function smartScroll(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    await new Promise<void>((resolve) => {
+  await page.evaluate(async (): Promise<void> => {
+    await new Promise<void>((resolve): void => {
       let totalHeight = 0;
       const distance = 400;
       const maxScrolls = 10;
       let scrollCount = 0;
       
-      const timer = setInterval(() => {
+      const timer = setInterval((): void => {
         const scrollHeight = document.body.scrollHeight;
         window.scrollBy(0, distance);
         totalHeight += distance;
@@ -275,7 +278,7 @@ export class LinkedInProfileScraper {
       statusLog(logSection, `Blocking resources: ${blockedResources.join(', ')}`);
 
       // Enhanced anti-detection
-      await page.evaluateOnNewDocument(() => {
+      await page.evaluateOnNewDocument((): void => {
         // Override the `plugins` property to use a custom getter
         Object.defineProperty(navigator, 'plugins', {
           get: () => [1, 2, 3, 4, 5]
@@ -296,13 +299,18 @@ export class LinkedInProfileScraper {
           runtime: {}
         };
 
-        // Override permissions
+        // Fixed: Override permissions with proper PermissionStatus return type
         const originalQuery = window.navigator.permissions.query;
-        window.navigator.permissions.query = (parameters: any) => (
-          parameters.name === 'notifications' ?
-            Promise.resolve({ state: Notification.permission as any }) :
-            originalQuery(parameters)
-        );
+        window.navigator.permissions.query = (parameters: PermissionDescriptor): Promise<PermissionStatus> => {
+          if (parameters.name === 'notifications') {
+            return Promise.resolve({
+              state: Notification.permission as PermissionState,
+              name: 'notifications',
+              onchange: null
+            } as PermissionStatus);
+          }
+          return originalQuery.call(window.navigator.permissions, parameters);
+        };
 
         // Randomize canvas fingerprint
         const getContext = HTMLCanvasElement.prototype.getContext;
@@ -310,9 +318,9 @@ export class LinkedInProfileScraper {
           if (args[0] === '2d') {
             const context = getContext.apply(this, args);
             if (context) {
-              const originalFillText = context.fillText;
-              context.fillText = function(...textArgs: any[]) {
-                return originalFillText.apply(this, textArgs);
+              const originalFillText = (context as CanvasRenderingContext2D).fillText;
+              (context as CanvasRenderingContext2D).fillText = function(...textArgs: any[]) {
+                return originalFillText.apply(this, textArgs as [string, number, number, number?]);
               };
             }
             return context;
@@ -412,7 +420,7 @@ export class LinkedInProfileScraper {
   };
 
   public close = (page?: Page): Promise<void> => {
-    return new Promise(async (resolve, reject) => {
+    return new Promise<void>(async (resolve, reject): Promise<void> => {
       const loggerPrefix = 'close';
 
       if (page) {
@@ -470,7 +478,10 @@ export class LinkedInProfileScraper {
         timeout: this.options.timeout
       });
 
-      await page.waitForTimeout(2000);
+      // Fixed: Use page.waitForTimeout properly or replace with setTimeout
+      await new Promise<void>((resolve): void => {
+        setTimeout(resolve, 2000);
+      });
 
       const currentUrl = page.url();
       const isLoggedIn = currentUrl.includes('/feed') || currentUrl.includes('/in/');
@@ -489,7 +500,7 @@ export class LinkedInProfileScraper {
       if (err instanceof SessionExpired) {
         throw err;
       }
-      throw new Error(`Login check failed: ${err.message}`);
+      throw new Error(`Login check failed: ${(err as Error).message}`);
     }
   };
 
@@ -533,12 +544,14 @@ export class LinkedInProfileScraper {
       await smartScroll(page);
       
       // Wait for dynamic content to stabilize
-      await page.waitForTimeout(3000);
+      await new Promise<void>((resolve): void => {
+        setTimeout(resolve, 3000);
+      });
 
       statusLog(logSection, '🔍 Extracting profile data using modern techniques...', scraperSessionId);
 
       // Extract profile data using JSON-LD + modern HTML selectors
-      const rawUserProfileData: RawProfile = await page.evaluate(() => {
+      const rawUserProfileData: RawProfile = await page.evaluate((): RawProfile => {
         const url = window.location.href;
         
         // Try JSON-LD first (most reliable)
@@ -604,7 +617,7 @@ export class LinkedInProfileScraper {
       // Extract experience data
       statusLog(logSection, '💼 Extracting experience data...', scraperSessionId);
 
-      const rawExperiencesData: RawExperience[] = await page.evaluate(() => {
+      const rawExperiencesData: RawExperience[] = await page.evaluate((): RawExperience[] => {
         const data: RawExperience[] = [];
         
         const experienceSelectors = [
@@ -621,7 +634,7 @@ export class LinkedInProfileScraper {
         }
 
         if (experienceNodes) {
-          Array.from(experienceNodes).forEach((node) => {
+          Array.from(experienceNodes).forEach((node): void => {
             try {
               const titleElement = node.querySelector('h3') || 
                                  node.querySelector('.mr1.t-bold span') ||
@@ -666,7 +679,7 @@ export class LinkedInProfileScraper {
         return data;
       });
 
-      const experiences: Experience[] = rawExperiencesData.map((rawExp) => {
+      const experiences: Experience[] = rawExperiencesData.map((rawExp): Experience => {
         const startDate = formatDate(rawExp.startDate);
         const endDate = formatDate(rawExp.endDate) || null;
         const durationInDays = rawExp.endDateIsPresent && startDate ? 
@@ -691,7 +704,7 @@ export class LinkedInProfileScraper {
       // Extract education data
       statusLog(logSection, '🎓 Extracting education data...', scraperSessionId);
 
-      const rawEducationData: RawEducation[] = await page.evaluate(() => {
+      const rawEducationData: RawEducation[] = await page.evaluate((): RawEducation[] => {
         const data: RawEducation[] = [];
         
         const educationSelectors = [
@@ -708,7 +721,7 @@ export class LinkedInProfileScraper {
         }
 
         if (educationNodes) {
-          Array.from(educationNodes).forEach((node) => {
+          Array.from(educationNodes).forEach((node): void => {
             try {
               const schoolNameElement = node.querySelector('h3.pv-entity__school-name') ||
                                       node.querySelector('.mr1.hoverable-link-text.t-bold');
@@ -737,7 +750,7 @@ export class LinkedInProfileScraper {
         return data;
       });
 
-      const education: Education[] = rawEducationData.map(rawEdu => ({
+      const education: Education[] = rawEducationData.map((rawEdu): Education => ({
         ...rawEdu,
         schoolName: getCleanText(rawEdu.schoolName),
         degreeName: getCleanText(rawEdu.degreeName),
@@ -750,11 +763,11 @@ export class LinkedInProfileScraper {
       statusLog(logSection, `🎓 Found ${education.length} education entries`, scraperSessionId);
 
       // Extract volunteer experiences
-      const rawVolunteerExperiences: RawVolunteerExperience[] = await page.evaluate(() => {
+      const rawVolunteerExperiences: RawVolunteerExperience[] = await page.evaluate((): RawVolunteerExperience[] => {
         const data: RawVolunteerExperience[] = [];
         const nodes = document.querySelectorAll('.volunteering-section ul li.ember-view');
 
-        Array.from(nodes).forEach((node) => {
+        Array.from(nodes).forEach((node): void => {
           try {
             const titleElement = node.querySelector('.pv-entity__summary-info h3');
             const title = titleElement?.textContent?.trim() || null;
@@ -784,7 +797,7 @@ export class LinkedInProfileScraper {
         return data;
       });
 
-      const volunteerExperiences: VolunteerExperience[] = rawVolunteerExperiences.map(rawVol => ({
+      const volunteerExperiences: VolunteerExperience[] = rawVolunteerExperiences.map((rawVol): VolunteerExperience => ({
         ...rawVol,
         title: getCleanText(rawVol.title),
         company: getCleanText(rawVol.company),
@@ -797,7 +810,7 @@ export class LinkedInProfileScraper {
       // Extract skills
       statusLog(logSection, '🏅 Extracting skills data...', scraperSessionId);
 
-      const skills: Skill[] = await page.evaluate(() => {
+      const skills: Skill[] = await page.evaluate((): Skill[] => {
         const skillSelectors = [
           '.pv-skill-categories-section ol > .ember-view',
           'section[data-section="skills"] ul li'
@@ -812,7 +825,7 @@ export class LinkedInProfileScraper {
 
         if (!skillNodes) return [];
 
-        return Array.from(skillNodes).map((node) => {
+        return Array.from(skillNodes).map((node): Skill => {
           try {
             const skillNameElement = node.querySelector('.pv-skill-category-entity__name-text') ||
                                    node.querySelector('.mr1.hoverable-link-text.t-bold');
@@ -826,7 +839,7 @@ export class LinkedInProfileScraper {
           } catch {
             return { skillName: null, endorsementCount: 0 };
           }
-        }).filter(skill => skill.skillName) as Skill[];
+        }).filter((skill): skill is Skill => skill.skillName !== null);
       });
 
       statusLog(logSection, `🏅 Found ${skills.length} skills`, scraperSessionId);
@@ -850,7 +863,7 @@ export class LinkedInProfileScraper {
 
     } catch (err) {
       await this.close();
-      statusLog(logSection, `❌ Scraping failed: ${err.message}`);
+      statusLog(logSection, `❌ Scraping failed: ${(err as Error).message}`);
       throw err;
     }
   };
