@@ -25,5 +25,7 @@ const app = express();
     return res.json(result);
   });
 
-  app.listen(process.env.PORT || 3000);
-})();
+ app.listen(Number(process.env.PORT) || 3000, "0.0.0.0", () => {
+  console.log("🚀 LinkedIn Scraper API running on port", process.env.PORT || 3000);
+});
+})(); // ← This closes the (async () => { function
