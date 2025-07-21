@@ -1,15 +1,14 @@
-import puppeteer, { Page, Browser } from 'puppeteer'
+import puppeteer, { Page, Browser, PuppeteerLaunchOptions } from 'puppeteer';
 import treeKill from 'tree-kill';
 
 import blockedHostsList from './blocked-hosts';
-
-import { getDurationInDays, formatDate, getCleanText, getLocationFromText, statusLog, getHostname } from './utils'
+import { getDurationInDays, formatDate, getCleanText, getLocationFromText, statusLog, getHostname } from './utils';
 import { SessionExpired } from './errors';
 
 export interface Location {
   city: string | null;
   province: string | null;
-  country: string | null
+  country: string | null;
 }
 
 interface RawProfile {
@@ -99,7 +98,7 @@ interface ScraperUserDefinedOptions {
   keepAlive?: boolean;
   userAgent?: string;
   timeout?: number;
-  headless?: boolean;
+  headless?: boolean | 'new' | 'shell';
 }
 
 interface ScraperOptions {
@@ -107,24 +106,29 @@ interface ScraperOptions {
   keepAlive: boolean;
   userAgent: string;
   timeout: number;
-  headless: boolean;
+  headless: boolean | 'new' | 'shell';
 }
 
-async function autoScroll(page: Page) {
-  await page.evaluate(() => {
-    return new Promise<void>((resolve) => {
+async function smartScroll(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    await new Promise<void>((resolve) => {
       let totalHeight = 0;
-      const distance = 300;
+      const distance = 400;
+      const maxScrolls = 10;
+      let scrollCount = 0;
+      
       const timer = setInterval(() => {
         const scrollHeight = document.body.scrollHeight;
         window.scrollBy(0, distance);
         totalHeight += distance;
+        scrollCount++;
 
-        if (totalHeight >= scrollHeight - window.innerHeight) {
+        // Stop if we've reached the bottom or made too many scrolls
+        if (totalHeight >= scrollHeight - window.innerHeight || scrollCount >= maxScrolls) {
           clearInterval(timer);
           resolve();
         }
-      }, 150);
+      }, 200);
     });
   });
 }
@@ -133,10 +137,10 @@ export class LinkedInProfileScraper {
   readonly options: ScraperOptions = {
     sessionCookieValue: '',
     keepAlive: false,
-    timeout: 30000,
+    timeout: 60000,
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    headless: true
-  }
+    headless: 'new'
+  };
 
   private browser: Browser | null = null;
 
@@ -148,7 +152,7 @@ export class LinkedInProfileScraper {
       throw new Error(`${errorPrefix} Option "sessionCookieValue" is required.`);
     }
     
-    if (userDefinedOptions.sessionCookieValue && typeof userDefinedOptions.sessionCookieValue !== 'string') {
+    if (typeof userDefinedOptions.sessionCookieValue !== 'string') {
       throw new Error(`${errorPrefix} Option "sessionCookieValue" needs to be a string.`);
     }
     
@@ -164,138 +168,220 @@ export class LinkedInProfileScraper {
       throw new Error(`${errorPrefix} Option "timeout" needs to be a number.`);
     }
     
-    if (userDefinedOptions.headless !== undefined && typeof userDefinedOptions.headless !== 'boolean') {
-      throw new Error(`${errorPrefix} Option "headless" needs to be a boolean.`);
+    if (userDefinedOptions.headless !== undefined && 
+        typeof userDefinedOptions.headless !== 'boolean' && 
+        userDefinedOptions.headless !== 'new' && 
+        userDefinedOptions.headless !== 'shell') {
+      throw new Error(`${errorPrefix} Option "headless" needs to be a boolean, 'new', or 'shell'.`);
     }
 
     this.options = Object.assign(this.options, userDefinedOptions);
-
-    statusLog(logSection, `Using options: ${JSON.stringify(this.options)}`);
+    statusLog(logSection, `Using options: ${JSON.stringify({ ...this.options, sessionCookieValue: '[REDACTED]' })}`);
   }
 
-  public setup = async () => {
-    const logSection = 'setup'
+  public setup = async (): Promise<void> => {
+    const logSection = 'setup';
 
     try {
-      statusLog(logSection, `Launching puppeteer in the ${this.options.headless ? 'background' : 'foreground'}...`)
+      statusLog(logSection, `Launching Puppeteer with Chrome for Testing...`);
 
-      this.browser = await puppeteer.launch({
+      const launchOptions: PuppeteerLaunchOptions = {
         headless: this.options.headless,
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-blink-features=AutomationControlled',
-          '--disable-features=VizDisplayCompositor',
+          '--exclude-switches=enable-automation',
+          '--disable-extensions-file-access-check',
+          '--disable-extensions-http-throttling',
+          '--disable-extensions-except',
+          '--disable-plugins',
+          '--disable-hang-monitor',
           '--disable-web-security',
-          '--disable-features=site-per-process',
+          '--disable-features=site-per-process,TranslateUI,VizDisplayCompositor',
           '--disable-dev-shm-usage',
           '--disable-accelerated-2d-canvas',
           '--disable-gpu',
           '--window-size=1920,1080',
           '--no-first-run',
           '--no-default-browser-check',
-          '--disable-extensions',
-          '--disable-plugins',
-          '--disable-images',
-          '--disable-javascript',
-          '--user-agent=' + this.options.userAgent
+          '--disable-default-apps',
+          '--disable-popup-blocking',
+          '--disable-prompt-on-repost',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+          '--disable-features=Translate',
+          '--disable-ipc-flooding-protection',
+          '--enable-features=NetworkService,NetworkServiceLogging',
+          '--force-color-profile=srgb',
+          '--metrics-recording-only',
+          '--use-mock-keychain',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+          '--disable-field-trial-config',
+          '--disable-back-forward-cache',
+          '--enable-features=NetworkService',
+          '--disable-features=ImprovedCookieControls,LazyFrameLoading,GlobalMediaControls,DestroyProfileOnBrowserClose,MediaRouter,DialMediaRouteProvider,AcceptCHFrame,AutoExpandDetailsElement,CertificateTransparencyComponentUpdater,AvoidUnnecessaryBeforeUnloadCheckSync,Translate',
+          '--aggressive-cache-discard',
+          '--disable-background-networking',
+          '--disable-default-apps',
+          '--disable-domain-reliability',
+          '--disable-component-update',
+          '--disable-client-side-phishing-detection'
         ],
         timeout: this.options.timeout,
-        ignoreDefaultArgs: ['--enable-automation']
-      })
+        ignoreDefaultArgs: ['--enable-automation', '--enable-blink-features=IdleDetection'],
+        ignoreHTTPSErrors: true
+      };
 
-      statusLog(logSection, 'Puppeteer launched!')
+      this.browser = await puppeteer.launch(launchOptions);
 
+      statusLog(logSection, 'Chrome for Testing launched successfully!');
+
+      // Verify login status
       await this.checkIfLoggedIn();
+      statusLog(logSection, 'Setup completed successfully!');
 
-      statusLog(logSection, 'Done!')
     } catch (err) {
       await this.close();
-      statusLog(logSection, 'An error occurred during setup.')
-      throw err
+      statusLog(logSection, 'An error occurred during setup.');
+      throw err;
     }
   };
 
   private createPage = async (): Promise<Page> => {
-    const logSection = 'setup page'
+    const logSection = 'setup page';
 
     if (!this.browser) {
       throw new Error('Browser not set.');
     }
 
-    const blockedResources = ['image', 'media', 'font', 'texttrack', 'object', 'beacon', 'csp_report', 'imageset'];
+    const blockedResources = [
+      'image', 'media', 'font', 'texttrack', 'object', 'beacon', 
+      'csp_report', 'imageset', 'stylesheet'
+    ];
 
     try {
-      const page = await this.browser.newPage()
+      const pages = await this.browser.pages();
+      const page = pages.length > 0 ? pages[0] : await this.browser.newPage();
 
-      const firstPage = (await this.browser.pages())[0];
-      if (firstPage) await firstPage.close();
+      // Close extra pages
+      const allPages = await this.browser.pages();
+      for (let i = 1; i < allPages.length; i++) {
+        await allPages[i].close();
+      }
 
-      statusLog(logSection, `Blocking the following resources: ${blockedResources.join(', ')}`)
+      statusLog(logSection, `Blocking resources: ${blockedResources.join(', ')}`);
+
+      // Enhanced anti-detection
+      await page.evaluateOnNewDocument(() => {
+        // Override the `plugins` property to use a custom getter
+        Object.defineProperty(navigator, 'plugins', {
+          get: () => [1, 2, 3, 4, 5]
+        });
+
+        // Override the `languages` property to use a custom getter
+        Object.defineProperty(navigator, 'languages', {
+          get: () => ['en-US', 'en']
+        });
+
+        // Override the `webdriver` property
+        Object.defineProperty(navigator, 'webdriver', {
+          get: () => false
+        });
+
+        // Mock chrome object
+        (window as any).chrome = {
+          runtime: {}
+        };
+
+        // Override permissions
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = (parameters: any) => (
+          parameters.name === 'notifications' ?
+            Promise.resolve({ state: Notification.permission as any }) :
+            originalQuery(parameters)
+        );
+
+        // Randomize canvas fingerprint
+        const getContext = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = function(this: HTMLCanvasElement, ...args: any[]) {
+          if (args[0] === '2d') {
+            const context = getContext.apply(this, args);
+            if (context) {
+              const originalFillText = context.fillText;
+              context.fillText = function(...textArgs: any[]) {
+                return originalFillText.apply(this, textArgs);
+              };
+            }
+            return context;
+          }
+          return getContext.apply(this, args);
+        };
+      });
 
       const blockedHosts = this.getBlockedHosts();
-      const blockedResourcesByHost = ['script', 'xhr', 'fetch', 'document']
-
-      statusLog(logSection, `Should block scripts from ${Object.keys(blockedHosts).length} unwanted hosts to speed up the crawling.`);
+      statusLog(logSection, `Blocking scripts from ${Object.keys(blockedHosts).length} unwanted hosts.`);
 
       await page.setRequestInterception(true);
 
       page.on('request', (req) => {
-        if (blockedResources.includes(req.resourceType())) {
-          return req.abort()
-        }
+        const resourceType = req.resourceType();
+        const url = req.url();
+        const hostname = getHostname(url);
 
-        const hostname = getHostname(req.url());
-
-        if (blockedResourcesByHost.includes(req.resourceType()) && hostname && blockedHosts[hostname] === true) {
-          statusLog('blocked script', `${req.resourceType()}: ${hostname}: ${req.url()}`);
+        // Block unnecessary resources
+        if (blockedResources.includes(resourceType)) {
           return req.abort();
         }
 
-        return req.continue()
-      })
+        // Block known tracking domains
+        if (hostname && blockedHosts[hostname]) {
+          statusLog('blocked', `${resourceType}: ${hostname}`);
+          return req.abort();
+        }
 
-      // Anti-detection measures
-      await page.evaluateOnNewDocument(() => {
-        // Remove webdriver traces
-        Object.defineProperty(navigator, 'webdriver', {
-          get: () => false,
-        });
-        
-        // Mock plugins and languages
-        Object.defineProperty(navigator, 'languages', {
-          get: () => ['en-US', 'en'],
-        });
-        
-        Object.defineProperty(navigator, 'plugins', {
-          get: () => [1, 2, 3, 4, 5],
-        });
+        // Allow the request
+        return req.continue();
       });
 
-      await page.setUserAgent(this.options.userAgent)
+      await page.setUserAgent(this.options.userAgent);
 
       await page.setViewport({
         width: 1920,
-        height: 1080
-      })
+        height: 1080,
+        deviceScaleFactor: 1
+      });
 
-      statusLog(logSection, `Setting session cookie using cookie: ${this.options.sessionCookieValue.substring(0, 20)}...`)
+      // Set extra headers to appear more human
+      await page.setExtraHTTPHeaders({
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1'
+      });
+
+      statusLog(logSection, 'Setting LinkedIn session cookie...');
 
       await page.setCookie({
-        'name': 'li_at',
-        'value': this.options.sessionCookieValue,
-        'domain': '.linkedin.com'
-      })
+        name: 'li_at',
+        value: this.options.sessionCookieValue,
+        domain: '.linkedin.com',
+        path: '/',
+        httpOnly: true,
+        secure: true
+      });
 
-      statusLog(logSection, 'Session cookie set!')
-      statusLog(logSection, 'Done!')
+      statusLog(logSection, 'Session cookie set successfully!');
 
       return page;
     } catch (err) {
       await this.close();
-      statusLog(logSection, 'An error occurred during page setup.')
-      statusLog(logSection, err.message)
-      throw err
+      statusLog(logSection, 'An error occurred during page setup.');
+      throw err;
     }
   };
 
@@ -304,15 +390,14 @@ export class LinkedInProfileScraper {
 
     let blockedHostsObject = blockedHostsArray.reduce((prev, curr) => {
       const frags = curr.split(' ');
-
       if (frags.length > 1 && frags[0] === '0.0.0.0') {
         prev[frags[1].trim()] = true;
       }
-
       return prev;
     }, {} as Record<string, boolean>);
 
-    blockedHostsObject = {
+    // Add additional known tracking domains
+    return {
       ...blockedHostsObject,
       'static.chartbeat.com': true,
       'scdn.cxense.com': true,
@@ -321,13 +406,10 @@ export class LinkedInProfileScraper {
       'connect.facebook.net': true,
       'platform.twitter.com': true,
       'tags.tiqcdn.com': true,
-      'dev.visualwebsiteoptimizer.com': true,
       'smartlock.google.com': true,
       'cdn.embedly.com': true
-    }
-
-    return blockedHostsObject;
-  }
+    };
+  };
 
   public close = (page?: Page): Promise<void> => {
     return new Promise(async (resolve, reject) => {
@@ -337,9 +419,10 @@ export class LinkedInProfileScraper {
         try {
           statusLog(loggerPrefix, 'Closing page...');
           await page.close();
-          statusLog(loggerPrefix, 'Closed page!');
+          statusLog(loggerPrefix, 'Page closed successfully!');
         } catch (err) {
-          reject(err)
+          reject(err);
+          return;
         }
       }
 
@@ -347,104 +430,118 @@ export class LinkedInProfileScraper {
         try {
           statusLog(loggerPrefix, 'Closing browser...');
           await this.browser.close();
-          statusLog(loggerPrefix, 'Closed browser!');
+          statusLog(loggerPrefix, 'Browser closed successfully!');
 
-          const browserProcessPid = this.browser.process()?.pid;
+          const browserProcess = this.browser.process();
+          const browserProcessPid = browserProcess?.pid;
 
           if (browserProcessPid) {
             statusLog(loggerPrefix, `Killing browser process pid: ${browserProcessPid}...`);
 
             treeKill(browserProcessPid, 'SIGKILL', (err) => {
               if (err) {
-                return reject(`Failed to kill browser process pid: ${browserProcessPid}`);
+                reject(`Failed to kill browser process pid: ${browserProcessPid}`);
+                return;
               }
-
-              statusLog(loggerPrefix, `Killed browser pid: ${browserProcessPid} Closed browser.`);
-              resolve()
+              statusLog(loggerPrefix, `Browser process ${browserProcessPid} killed successfully.`);
+              resolve();
             });
+          } else {
+            resolve();
           }
         } catch (err) {
           reject(err);
         }
+      } else {
+        resolve();
       }
+    });
+  };
 
-      return resolve()
-    })
-  }
-
-  public checkIfLoggedIn = async () => {
+  public checkIfLoggedIn = async (): Promise<void> => {
     const logSection = 'checkIfLoggedIn';
     const page = await this.createPage();
 
-    statusLog(logSection, 'Checking if we are still logged in...')
+    statusLog(logSection, 'Checking LinkedIn login status...');
 
-    await page.goto('https://www.linkedin.com/login', {
-      waitUntil: 'networkidle2',
-      timeout: this.options.timeout
-    })
+    try {
+      await page.goto('https://www.linkedin.com/feed', {
+        waitUntil: 'networkidle2',
+        timeout: this.options.timeout
+      });
 
-    const url = page.url()
-    const isLoggedIn = !url.endsWith('/login')
+      await page.waitForTimeout(2000);
 
-    await page.close();
+      const currentUrl = page.url();
+      const isLoggedIn = currentUrl.includes('/feed') || currentUrl.includes('/in/');
 
-    if (isLoggedIn) {
-      statusLog(logSection, 'All good. We are still logged in.')
-    } else {
-      const errorMessage = 'Bad news, we are not logged in! Your session seems to be expired. Use your browser to login again with your LinkedIn credentials and extract the "li_at" cookie value for the "sessionCookieValue" option.';
-      statusLog(logSection, errorMessage)
-      throw new SessionExpired(errorMessage)
+      await page.close();
+
+      if (isLoggedIn) {
+        statusLog(logSection, 'Login verified - session is active!');
+      } else {
+        const errorMessage = 'Session expired! Please update your li_at cookie value.';
+        statusLog(logSection, errorMessage);
+        throw new SessionExpired(errorMessage);
+      }
+    } catch (err) {
+      await page.close();
+      if (err instanceof SessionExpired) {
+        throw err;
+      }
+      throw new Error(`Login check failed: ${err.message}`);
     }
   };
 
   /**
-   * MODERN 2025 LinkedIn Profile Scraper using JSON-LD + HTML fallbacks
+   * Modern LinkedIn Profile Scraper - 2025 Edition
+   * Optimized for Puppeteer 24.14.0 with Chrome for Testing
    */
   public run = async (profileUrl: string) => {
-    const logSection = 'run'
-    const scraperSessionId = new Date().getTime();
+    const logSection = 'run';
+    const scraperSessionId = Date.now();
 
     if (!this.browser) {
-      throw new Error('Browser is not set. Please run the setup method first.')
+      throw new Error('Browser is not set. Please run the setup method first.');
     }
 
     if (!profileUrl) {
-      throw new Error('No profileUrl given.')
+      throw new Error('No profileUrl given.');
     }
 
     if (!profileUrl.includes('linkedin.com/')) {
-      throw new Error('The given URL to scrape is not a linkedin.com url.')
+      throw new Error('The given URL to scrape is not a linkedin.com url.');
     }
 
     try {
       const page = await this.createPage();
-
-      statusLog(logSection, `Navigating to LinkedIn profile: ${profileUrl}`, scraperSessionId)
+      
+      statusLog(logSection, `🎯 Navigating to: ${profileUrl}`, scraperSessionId);
 
       await page.goto(profileUrl, {
         waitUntil: 'networkidle0',
         timeout: this.options.timeout
       });
 
-      statusLog(logSection, 'LinkedIn profile page loaded!', scraperSessionId)
+      statusLog(logSection, '📄 LinkedIn profile page loaded!', scraperSessionId);
 
-      // Wait for main content to load
-      await page.waitForSelector('main', { timeout: 10000 });
+      // Wait for main content
+      await page.waitForSelector('main', { timeout: 15000 });
       
-      statusLog(logSection, 'Getting all the LinkedIn profile data by scrolling the page to the bottom, so all the data gets loaded into the page...', scraperSessionId)
+      // Smart scrolling to load all content
+      statusLog(logSection, '📜 Loading all profile content...', scraperSessionId);
+      await smartScroll(page);
+      
+      // Wait for dynamic content to stabilize
+      await page.waitForTimeout(3000);
 
-      await autoScroll(page);
+      statusLog(logSection, '🔍 Extracting profile data using modern techniques...', scraperSessionId);
 
-      // Wait for dynamic content to load
-      await page.waitFor(2000);
-
-      statusLog(logSection, 'Parsing data...', scraperSessionId)
-
-      // Modern 2025 Profile Data Extraction using JSON-LD + HTML fallbacks
+      // Extract profile data using JSON-LD + modern HTML selectors
       const rawUserProfileData: RawProfile = await page.evaluate(() => {
         const url = window.location.href;
         
-        // 1. Try JSON-LD structured data first (most reliable)
+        // Try JSON-LD first (most reliable)
         const jsonLdScripts = document.querySelectorAll('script[type="application/ld+json"]');
         let profileData: any = {};
         
@@ -452,7 +549,6 @@ export class LinkedInProfileScraper {
           try {
             const data = JSON.parse(script.textContent || '');
             if (data['@graph']) {
-              // LinkedIn uses @graph structure
               const person = data['@graph'].find((item: any) => item['@type'] === 'Person');
               if (person) {
                 profileData = person;
@@ -462,73 +558,59 @@ export class LinkedInProfileScraper {
               profileData = data;
               break;
             }
-          } catch (e) {
-            // Skip invalid JSON
+          } catch {
             continue;
           }
         }
         
-        // 2. HTML fallbacks with modern selectors
+        // Modern HTML selectors with multiple fallbacks
         const fullName = profileData.name || 
+          document.querySelector('h1.text-heading-xlarge')?.textContent?.trim() ||
           document.querySelector('h1')?.textContent?.trim() ||
-          document.querySelector('[data-generated-suggestion-target]')?.textContent?.trim() ||
-          document.querySelector('.text-heading-xlarge')?.textContent?.trim() ||
           null;
           
         const title = profileData.jobTitle || 
           document.querySelector('.text-body-medium.break-words')?.textContent?.trim() ||
-          document.querySelector('[data-generated-suggestion-target] + div')?.textContent?.trim() ||
           document.querySelector('.pv-text-details__left-panel h2')?.textContent?.trim() ||
           null;
           
-        const location = (profileData.address && profileData.address.addressLocality) || 
-          document.querySelector('[data-test-id="profile-location"]')?.textContent?.trim() ||
+        const location = (profileData.address?.addressLocality) || 
           document.querySelector('.text-body-small.inline.t-black--light.break-words')?.textContent?.trim() ||
           null;
           
         const photo = profileData.image || 
-          document.querySelector('img[data-ghost-classes]')?.getAttribute('src') ||
-          document.querySelector('.pv-top-card__photo img')?.getAttribute('src') ||
+          document.querySelector('img.pv-top-card-profile-picture__image')?.getAttribute('src') ||
           document.querySelector('button img[width="200"]')?.getAttribute('src') ||
           null;
           
         const description = profileData.description || 
-          document.querySelector('[data-generated-suggestion-target="about"]')?.textContent?.trim() ||
-          document.querySelector('.display-flex.full-width')?.textContent?.trim() ||
+          document.querySelector('div.display-flex.full-width')?.textContent?.trim() ||
+          document.querySelector('.pv-about__summary-text')?.textContent?.trim() ||
           null;
 
-        return {
-          fullName,
-          title,
-          location,
-          photo,
-          description,
-          url
-        } as RawProfile
-      })
+        return { fullName, title, location, photo, description, url } as RawProfile;
+      });
 
       const userProfile: Profile = {
         ...rawUserProfileData,
         fullName: getCleanText(rawUserProfileData.fullName),
         title: getCleanText(rawUserProfileData.title),
         location: rawUserProfileData.location ? getLocationFromText(rawUserProfileData.location) : null,
-        description: getCleanText(rawUserProfileData.description),
-      }
+        description: getCleanText(rawUserProfileData.description)
+      };
 
-      statusLog(logSection, `Got user profile data: ${JSON.stringify(userProfile)}`, scraperSessionId)
+      statusLog(logSection, `👤 Profile data extracted: ${userProfile.fullName || 'Unknown'}`, scraperSessionId);
 
-      // Modern Experience Data Extraction
-      statusLog(logSection, `Parsing experiences data...`, scraperSessionId)
+      // Extract experience data
+      statusLog(logSection, '💼 Extracting experience data...', scraperSessionId);
 
       const rawExperiencesData: RawExperience[] = await page.evaluate(() => {
-        let data: RawExperience[] = []
-
-        // Modern LinkedIn experience selectors
+        const data: RawExperience[] = [];
+        
         const experienceSelectors = [
           'section[data-section="experience"] ul li',
-          '[data-section="experience"] .pvs-list__item',
-          '.experience-section ul .pv-entity',
-          'main section:nth-child(4) ul li' // Fallback position-based
+          '#experience-section .pv-entity',
+          '.experience-section .pv-position-entity'
         ];
 
         let experienceNodes: NodeListOf<Element> | null = null;
@@ -538,18 +620,16 @@ export class LinkedInProfileScraper {
           if (experienceNodes.length > 0) break;
         }
 
-        if (experienceNodes && experienceNodes.length > 0) {
+        if (experienceNodes) {
           Array.from(experienceNodes).forEach((node) => {
             try {
-              const titleElement = node.querySelector('div[data-field="title"]') || 
+              const titleElement = node.querySelector('h3') || 
                                  node.querySelector('.mr1.t-bold span') ||
-                                 node.querySelector('.pv-entity__summary-info h3') ||
-                                 node.querySelector('h3');
+                                 node.querySelector('[data-field="title"]');
               const title = titleElement?.textContent?.trim() || null;
 
               const companyElement = node.querySelector('span.t-14.t-normal') ||
-                                   node.querySelector('.pv-entity__secondary-title') ||
-                                   node.querySelector('[data-field="company"]');
+                                   node.querySelector('.pv-entity__secondary-title');
               const company = companyElement?.textContent?.replace(/·.*/, '')?.trim() || null;
 
               const employmentTypeElement = node.querySelector('.pv-entity__secondary-title span');
@@ -559,36 +639,26 @@ export class LinkedInProfileScraper {
                                     node.querySelector('.pv-entity__location span:nth-child(2)');
               const location = locationElement?.textContent?.trim() || null;
 
-              const dateElement = node.querySelector('.t-14.t-black--light.t-normal') ||
-                                node.querySelector('.pv-entity__date-range span:nth-child(2)');
+              const dateElement = node.querySelector('.pv-entity__date-range span:nth-child(2)');
               const dateText = dateElement?.textContent?.trim() || '';
 
-              const startDatePart = dateText?.split('–')[0]?.trim() || dateText?.split(' - ')[0]?.trim() || null;
-              const startDate = startDatePart || null;
+              const [startPart, endPart] = dateText.split('–').map(s => s?.trim());
+              const startDate = startPart || null;
+              const endDateIsPresent = endPart?.toLowerCase().includes('present') || false;
+              const endDate = (endPart && !endDateIsPresent) ? endPart : 'Present';
 
-              const endDatePart = dateText?.split('–')[1]?.trim() || dateText?.split(' - ')[1]?.trim() || null;
-              const endDateIsPresent = endDatePart?.toLowerCase().includes('present') || false;
-              const endDate = (endDatePart && !endDateIsPresent) ? endDatePart : 'Present';
-
-              const descriptionElement = node.querySelector('[data-field="description"]') ||
-                                        node.querySelector('.pv-entity__description');
+              const descriptionElement = node.querySelector('.pv-entity__description') ||
+                                        node.querySelector('[data-field="description"]');
               const description = descriptionElement?.textContent?.trim() || null;
 
-              if (title || company) { // Only add if we have at least title or company
+              if (title || company) {
                 data.push({
-                  title,
-                  company,
-                  employmentType,
-                  location,
-                  startDate,
-                  endDate,
-                  endDateIsPresent,
-                  description
+                  title, company, employmentType, location,
+                  startDate, endDate, endDateIsPresent, description
                 });
               }
-            } catch (e) {
+            } catch {
               // Skip problematic nodes
-              return;
             }
           });
         }
@@ -596,42 +666,38 @@ export class LinkedInProfileScraper {
         return data;
       });
 
-      const experiences: Experience[] = rawExperiencesData.map((rawExperience) => {
-        const startDate = formatDate(rawExperience.startDate);
-        const endDate = formatDate(rawExperience.endDate) || null;
-        const endDateIsPresent = rawExperience.endDateIsPresent;
-
-        const durationInDaysWithEndDate = (startDate && endDate && !endDateIsPresent) ? getDurationInDays(startDate, endDate) : null
-        const durationInDaysForPresentDate = (endDateIsPresent && startDate) ? getDurationInDays(startDate, new Date()) : null
-        const durationInDays = endDateIsPresent ? durationInDaysForPresentDate : durationInDaysWithEndDate;
+      const experiences: Experience[] = rawExperiencesData.map((rawExp) => {
+        const startDate = formatDate(rawExp.startDate);
+        const endDate = formatDate(rawExp.endDate) || null;
+        const durationInDays = rawExp.endDateIsPresent && startDate ? 
+          getDurationInDays(startDate, new Date()) : 
+          (startDate && endDate ? getDurationInDays(startDate, endDate) : null);
 
         return {
-          ...rawExperience,
-          title: getCleanText(rawExperience.title),
-          company: getCleanText(rawExperience.company),
-          employmentType: getCleanText(rawExperience.employmentType),
-          location: rawExperience?.location ? getLocationFromText(rawExperience.location) : null,
-          startDate,
-          endDate,
-          endDateIsPresent,
+          ...rawExp,
+          title: getCleanText(rawExp.title),
+          company: getCleanText(rawExp.company),
+          employmentType: getCleanText(rawExp.employmentType),
+          location: rawExp.location ? getLocationFromText(rawExp.location) : null,
+          startDate, endDate,
+          endDateIsPresent: rawExp.endDateIsPresent,
           durationInDays,
-          description: getCleanText(rawExperience.description)
-        }
-      })
+          description: getCleanText(rawExp.description)
+        };
+      });
 
-      statusLog(logSection, `Got experiences data: ${JSON.stringify(experiences)}`, scraperSessionId)
+      statusLog(logSection, `💼 Found ${experiences.length} experience entries`, scraperSessionId);
 
-      // Modern Education Data Extraction
-      statusLog(logSection, `Parsing education data...`, scraperSessionId)
+      // Extract education data
+      statusLog(logSection, '🎓 Extracting education data...', scraperSessionId);
 
       const rawEducationData: RawEducation[] = await page.evaluate(() => {
-        let data: RawEducation[] = []
-
+        const data: RawEducation[] = [];
+        
         const educationSelectors = [
           'section[data-section="education"] ul li',
-          '[data-section="education"] .pvs-list__item',
-          '.education-section ul .pv-entity',
-          'main section:nth-child(5) ul li' // Fallback
+          '#education-section .pv-entity',
+          '.education-section .pv-education-entity'
         ];
 
         let educationNodes: NodeListOf<Element> | null = null;
@@ -641,147 +707,100 @@ export class LinkedInProfileScraper {
           if (educationNodes.length > 0) break;
         }
 
-        if (educationNodes && educationNodes.length > 0) {
+        if (educationNodes) {
           Array.from(educationNodes).forEach((node) => {
             try {
-              const schoolNameElement = node.querySelector('.mr1.hoverable-link-text.t-bold') ||
-                                      node.querySelector('h3.pv-entity__school-name') ||
-                                      node.querySelector('[data-field="school_name"]');
+              const schoolNameElement = node.querySelector('h3.pv-entity__school-name') ||
+                                      node.querySelector('.mr1.hoverable-link-text.t-bold');
               const schoolName = schoolNameElement?.textContent?.trim() || null;
 
-              const degreeElement = node.querySelector('.t-14.t-normal') ||
-                                  node.querySelector('.pv-entity__degree-name .pv-entity__comma-item');
+              const degreeElement = node.querySelector('.pv-entity__degree-name .pv-entity__comma-item') ||
+                                  node.querySelector('.t-14.t-normal');
               const degreeName = degreeElement?.textContent?.trim() || null;
 
-              const fieldElement = node.querySelector('.t-14.t-normal span') ||
-                                 node.querySelector('.pv-entity__fos .pv-entity__comma-item');
+              const fieldElement = node.querySelector('.pv-entity__fos .pv-entity__comma-item');
               const fieldOfStudy = fieldElement?.textContent?.trim() || null;
 
-              const dateElements = node.querySelectorAll('time') ||
-                                 node.querySelectorAll('.pv-entity__dates time');
-              
+              const dateElements = node.querySelectorAll('.pv-entity__dates time');
               const startDate = dateElements[0]?.textContent?.trim() || null;
               const endDate = dateElements[1]?.textContent?.trim() || null;
 
-              if (schoolName) { // Only add if we have at least school name
-                data.push({
-                  schoolName,
-                  degreeName,
-                  fieldOfStudy,
-                  startDate,
-                  endDate
-                });
+              if (schoolName) {
+                data.push({ schoolName, degreeName, fieldOfStudy, startDate, endDate });
               }
-            } catch (e) {
-              return;
+            } catch {
+              // Skip problematic nodes
             }
           });
         }
 
-        return data
+        return data;
       });
 
-      const education: Education[] = rawEducationData.map(rawEducation => {
-        const startDate = formatDate(rawEducation.startDate)
-        const endDate = formatDate(rawEducation.endDate)
+      const education: Education[] = rawEducationData.map(rawEdu => ({
+        ...rawEdu,
+        schoolName: getCleanText(rawEdu.schoolName),
+        degreeName: getCleanText(rawEdu.degreeName),
+        fieldOfStudy: getCleanText(rawEdu.fieldOfStudy),
+        startDate: formatDate(rawEdu.startDate),
+        endDate: formatDate(rawEdu.endDate),
+        durationInDays: getDurationInDays(formatDate(rawEdu.startDate), formatDate(rawEdu.endDate))
+      }));
 
-        return {
-          ...rawEducation,
-          schoolName: getCleanText(rawEducation.schoolName),
-          degreeName: getCleanText(rawEducation.degreeName),
-          fieldOfStudy: getCleanText(rawEducation.fieldOfStudy),
-          startDate,
-          endDate,
-          durationInDays: getDurationInDays(startDate, endDate),
-        }
-      })
+      statusLog(logSection, `🎓 Found ${education.length} education entries`, scraperSessionId);
 
-      statusLog(logSection, `Got education data: ${JSON.stringify(education)}`, scraperSessionId)
-
-      // Modern Volunteer Experience
-      statusLog(logSection, `Parsing volunteer experience data...`, scraperSessionId)
-
+      // Extract volunteer experiences
       const rawVolunteerExperiences: RawVolunteerExperience[] = await page.evaluate(() => {
-        let data: RawVolunteerExperience[] = []
+        const data: RawVolunteerExperience[] = [];
+        const nodes = document.querySelectorAll('.volunteering-section ul li.ember-view');
 
-        const volunteerSelectors = [
-          'section[data-section="volunteering"] ul li',
-          '.volunteering-section ul li.ember-view'
-        ];
+        Array.from(nodes).forEach((node) => {
+          try {
+            const titleElement = node.querySelector('.pv-entity__summary-info h3');
+            const title = titleElement?.textContent?.trim() || null;
+            
+            const companyElement = node.querySelector('.pv-entity__summary-info span.pv-entity__secondary-title');
+            const company = companyElement?.textContent?.trim() || null;
 
-        let volunteerNodes: NodeListOf<Element> | null = null;
-        
-        for (const selector of volunteerSelectors) {
-          volunteerNodes = document.querySelectorAll(selector);
-          if (volunteerNodes.length > 0) break;
-        }
+            const dateElement = node.querySelector('.pv-entity__date-range span:nth-child(2)');
+            const dateText = dateElement?.textContent?.trim() || '';
+            
+            const [startPart, endPart] = dateText.split('–').map(s => s?.trim());
+            const startDate = startPart || null;
+            const endDateIsPresent = endPart?.toLowerCase() === 'present' || false;
+            const endDate = (endPart && !endDateIsPresent) ? endPart : 'Present';
 
-        if (volunteerNodes && volunteerNodes.length > 0) {
-          Array.from(volunteerNodes).forEach((node) => {
-            try {
-              const titleElement = node.querySelector('.pv-entity__summary-info h3');
-              const title = titleElement?.textContent?.trim() || null;
-              
-              const companyElement = node.querySelector('.pv-entity__summary-info span.pv-entity__secondary-title');
-              const company = companyElement?.textContent?.trim() || null;
+            const descriptionElement = node.querySelector('.pv-entity__description');
+            const description = descriptionElement?.textContent?.trim() || null;
 
-              const dateElement = node.querySelector('.pv-entity__date-range span:nth-child(2)');
-              const dateText = dateElement?.textContent?.trim() || '';
-              
-              const startDatePart = dateText?.split('–')[0]?.trim() || null;
-              const startDate = startDatePart || null;
-
-              const endDatePart = dateText?.split('–')[1]?.trim() || null;
-              const endDateIsPresent = endDatePart?.toLowerCase() === 'present' || false;
-              const endDate = (endDatePart && !endDateIsPresent) ? endDatePart : 'Present';
-
-              const descriptionElement = node.querySelector('.pv-entity__description')
-              const description = descriptionElement?.textContent?.trim() || null;
-
-              if (title) {
-                data.push({
-                  title,
-                  company,
-                  startDate,
-                  endDate,
-                  endDateIsPresent,
-                  description
-                });
-              }
-            } catch (e) {
-              return;
+            if (title) {
+              data.push({ title, company, startDate, endDate, endDateIsPresent, description });
             }
-          });
-        }
+          } catch {
+            // Skip problematic nodes
+          }
+        });
 
-        return data
+        return data;
       });
 
-      const volunteerExperiences: VolunteerExperience[] = rawVolunteerExperiences.map(rawVolunteerExperience => {
-        const startDate = formatDate(rawVolunteerExperience.startDate)
-        const endDate = formatDate(rawVolunteerExperience.endDate)
+      const volunteerExperiences: VolunteerExperience[] = rawVolunteerExperiences.map(rawVol => ({
+        ...rawVol,
+        title: getCleanText(rawVol.title),
+        company: getCleanText(rawVol.company),
+        description: getCleanText(rawVol.description),
+        startDate: formatDate(rawVol.startDate),
+        endDate: formatDate(rawVol.endDate),
+        durationInDays: getDurationInDays(formatDate(rawVol.startDate), formatDate(rawVol.endDate))
+      }));
 
-        return {
-          ...rawVolunteerExperience,
-          title: getCleanText(rawVolunteerExperience.title),
-          company: getCleanText(rawVolunteerExperience.company),
-          description: getCleanText(rawVolunteerExperience.description),
-          startDate,
-          endDate,
-          durationInDays: getDurationInDays(startDate, endDate),
-        }
-      })
-
-      statusLog(logSection, `Got volunteer experience data: ${JSON.stringify(volunteerExperiences)}`, scraperSessionId)
-
-      // Modern Skills Data Extraction
-      statusLog(logSection, `Parsing skills data...`, scraperSessionId)
+      // Extract skills
+      statusLog(logSection, '🏅 Extracting skills data...', scraperSessionId);
 
       const skills: Skill[] = await page.evaluate(() => {
         const skillSelectors = [
-          'section[data-section="skills"] ul li',
           '.pv-skill-categories-section ol > .ember-view',
-          '[data-section="skills"] .pvs-list__item'
+          'section[data-section="skills"] ul li'
         ];
 
         let skillNodes: NodeListOf<Element> | null = null;
@@ -795,40 +814,30 @@ export class LinkedInProfileScraper {
 
         return Array.from(skillNodes).map((node) => {
           try {
-            const skillNameElement = node.querySelector('.mr1.hoverable-link-text.t-bold') ||
-                                   node.querySelector('.pv-skill-category-entity__name-text') ||
-                                   node.querySelector('[data-field="skill_name"]');
+            const skillNameElement = node.querySelector('.pv-skill-category-entity__name-text') ||
+                                   node.querySelector('.mr1.hoverable-link-text.t-bold');
             const skillName = skillNameElement?.textContent?.trim() || null;
 
-            const endorsementElement = node.querySelector('.t-14.t-black--light.t-normal') ||
-                                     node.querySelector('.pv-skill-category-entity__endorsement-count');
+            const endorsementElement = node.querySelector('.pv-skill-category-entity__endorsement-count');
             const endorsementText = endorsementElement?.textContent?.trim() || '0';
             const endorsementCount = parseInt(endorsementText.replace(/\D/g, '')) || 0;
 
-            return {
-              skillName,
-              endorsementCount
-            } as Skill;
-          } catch (e) {
-            return {
-              skillName: null,
-              endorsementCount: 0
-            } as Skill;
+            return { skillName, endorsementCount };
+          } catch {
+            return { skillName: null, endorsementCount: 0 };
           }
         }).filter(skill => skill.skillName) as Skill[];
       });
 
-      statusLog(logSection, `Got skills data: ${JSON.stringify(skills)}`, scraperSessionId)
-
-      statusLog(logSection, `Done! Returned profile details for: ${profileUrl}`, scraperSessionId)
+      statusLog(logSection, `🏅 Found ${skills.length} skills`, scraperSessionId);
+      statusLog(logSection, `✅ Profile scraping completed successfully!`, scraperSessionId);
 
       if (!this.options.keepAlive) {
-        statusLog(logSection, 'Not keeping the session alive.')
-        await this.close(page)
-        statusLog(logSection, 'Done. Puppeteer is closed.')
+        statusLog(logSection, '🔄 Closing browser session...');
+        await this.close(page);
       } else {
-        statusLog(logSection, 'Done. Puppeteer is being kept alive in memory.')
-        await page.close()
+        statusLog(logSection, '💾 Keeping browser session alive in memory.');
+        await page.close();
       }
 
       return {
@@ -837,11 +846,12 @@ export class LinkedInProfileScraper {
         education,
         volunteerExperiences,
         skills
-      }
+      };
+
     } catch (err) {
-      await this.close()
-      statusLog(logSection, 'An error occurred during a run.')
+      await this.close();
+      statusLog(logSection, `❌ Scraping failed: ${err.message}`);
       throw err;
     }
-  }
+  };
 }
