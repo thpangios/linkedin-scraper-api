@@ -5,7 +5,7 @@ const app = express();
 (async () => {
   const scraper = new LinkedInProfileScraper({
     sessionCookieValue: `${process.env.LINKEDIN_SESSION_COOKIE_VALUE}`,
-    keepAlive: false,
+    keepAlive: true,
   });
   await scraper.setup();
   
